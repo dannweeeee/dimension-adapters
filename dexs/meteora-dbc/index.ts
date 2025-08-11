@@ -1,17 +1,23 @@
-import { SimpleAdapter } from "../../adapters/types";
+import { Adapter } from "../../adapters/types";
 import { CHAIN } from "../../helpers/chains";
 import { queryDuneSql } from "../../helpers/dune";
 import { FetchOptions } from "../../adapters/types";
 
 interface IData {
-    total_volume: number;
-    total_trading_fees: number;
-    total_protocol_fees: number;
-    total_referral_fees: number;
+  total_volume: number;
+  total_trading_fees: number;
+  total_protocol_fees: number;
+  total_referral_fees: number;
 }
 
-const fetch = async (_a: any, _b: any, options: FetchOptions) => {
-    const data: IData[] = await queryDuneSql(options, `
+const fetch = async (options: FetchOptions) => {
+  const currentTimestamp = Math.floor(Date.now() / 1000);
+  const endTimestamp = currentTimestamp;
+  const startTimestamp = endTimestamp - 24 * 60 * 60;
+
+  const data: IData[] = await queryDuneSql(
+    { startTimestamp, endTimestamp },
+    `
         WITH
             swap_events AS (
                 SELECT
@@ -27,7 +33,8 @@ const fetch = async (_a: any, _b: any, options: FetchOptions) => {
                     executing_account = 'dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN'
                     AND tx_success = TRUE
                     AND VARBINARY_STARTS_WITH (data, 0xe445a52e51cb9a1d1b3c15d58aaabb93)
-                    AND TIME_RANGE
+                    AND block_time >= from_unixtime(${startTimestamp})
+                    AND block_time <= from_unixtime(${endTimestamp})
             )
         SELECT
             SUM(
@@ -58,40 +65,47 @@ const fetch = async (_a: any, _b: any, options: FetchOptions) => {
                 END
             ) / 1e9 AS total_referral_fees
         FROM swap_events
-    `)
-    const dailyVolume = options.createBalances();
-    const dailyFees = options.createBalances();
-    const dailyProtocolFees = options.createBalances();
-    
-    dailyVolume.addCGToken('solana', data[0].total_volume);
-    dailyFees.addCGToken('solana', data[0].total_trading_fees + data[0].total_protocol_fees + data[0].total_referral_fees);
-    dailyProtocolFees.addCGToken('solana', data[0].total_protocol_fees);
+    `
+  );
+  console.log("Dune Query Raw Data:", data);
 
-    return {
-        dailyVolume,
-        dailyFees,
-        dailyUserFees: dailyFees,
-        dailyRevenue: dailyProtocolFees,
-        dailyProtocolRevenue: dailyProtocolFees,
-    };
+  const dailyVolume = options.createBalances();
+  const dailyFees = options.createBalances();
+  const dailyProtocolFees = options.createBalances();
+
+  dailyVolume.addCGToken("solana", data[0]?.total_volume || 0);
+  dailyFees.addCGToken(
+    "solana",
+    (data[0]?.total_trading_fees || 0) +
+      (data[0]?.total_protocol_fees || 0) +
+      (data[0]?.total_referral_fees || 0)
+  );
+  dailyProtocolFees.addCGToken("solana", data[0]?.total_protocol_fees || 0);
+
+  return {
+    dailyVolume,
+    dailyFees,
+    dailyUserFees: dailyFees,
+    dailyRevenue: dailyProtocolFees,
+    dailyProtocolRevenue: dailyProtocolFees,
+  };
 };
 
-
-const adapter: SimpleAdapter = {
-    version: 1,
-    adapter: {
-        [CHAIN.SOLANA]: {
-            fetch,
-            start: '2025-04-23',
-            meta: {
-                methodology: {
-                    Fees: "Trading fees paid by users",
-                    Revenue: "Protocol fees collected by Meteora DBC protocol"
-                }
-            }
-        }
+const adapter: Adapter = {
+  version: 2,
+  adapter: {
+    [CHAIN.SOLANA]: {
+      fetch,
+      start: "2025-04-23",
+      runAtCurrTime: true,
+      meta: {
+        methodology: {
+          Fees: "Trading fees paid by users",
+          Revenue: "Protocol fees collected by Meteora DBC protocol",
+        },
+      },
     },
-    isExpensiveAdapter: true
-}
+  },
+};
 
-export default adapter
+export default adapter;

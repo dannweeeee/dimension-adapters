@@ -1,2 +1,2 @@
-import adapter  from '../dexs/meteora-dlmm';
+import adapter from "../dexs/meteora-dlmm";
 export default adapter;
